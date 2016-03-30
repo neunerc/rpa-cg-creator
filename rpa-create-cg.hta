@@ -1,0 +1,222 @@
+<!-- Created by Christopher Neuner -->
+<!-- Last update: 03/03/2016 -->
+<HTML>
+<HEAD><TITLE>RecoverPoint Consistency Group Script Creator</TITLE></HEAD>
+<HTA:Application id="rpcg"
+	applicationName = "RecoverPoint Consistency Group Script Creator"
+	Scroll=no
+	BorderStyle = normal
+	ShowInTaskBar = YES
+	MaximizeButton = YES
+	MinimizeButton = YES
+>
+
+<SCRIPT LANGUAGE="VBScript">
+Option Explicit
+
+Sub Window_onLoad
+	window.resizeTo 770,620 'width,height
+	document.forms("inputform").txt_CG_NAME.focus()
+End Sub
+
+Function CreateScript(str_CG_NAME, str_COPY_PRODUCTION, str_COPY_REPLICA, str_CLUSTER_PRODUCTION, str_CLUSTER_REPLICA, str_RSETS, str_ProdJrnl, str_ReplJrnl, bool_SRM)
+	Dim strText
+	'CREATE CONSISTENCY GROUP
+	strText = "create_group name=" & chr(34) & str_CG_NAME & chr(34) & vbcrlf
+	'CREATE PRODUCTION COPY
+	strText = strText & "create_production_copy group=" & chr(34) & str_CG_NAME & chr(34) & " name=" & chr(34) & str_COPY_PRODUCTION & chr(34) & " cluster=" & chr(34) & str_CLUSTER_PRODUCTION & chr(34) & vbcrlf
+	'CREATE REPLICA COPY
+	strText = strText & "create_replica_copy group=" & chr(34) & str_CG_NAME & chr(34) & " name=" & chr(34) & str_COPY_REPLICA & chr(34) & " cluster=" & chr(34) & str_CLUSTER_REPLICA & chr(34) & vbcrlf
+	
+	'CREATE REPLICATION SETS
+	Dim re, strTextPairs, pairs, pair, i
+	Set re = new regexp  'Create the RegExp object
+	re.pattern = "^(([a-f0-9]{2})|:)+(\s{1})(([a-f0-9]{2})|:)+$"
+	re.IgnoreCase = true
+	i = 0
+	pairs=Split(str_RSETS, vbcrlf)
+	strTextPairs = ""
+	if UBound(pairs) > -1 then
+		for each pair in pairs
+			if re.Test(pair) then
+				Dim split_pair
+				split_pair=Split(pair," ")
+				if UBound(split_pair) > 0 then
+					strTextPairs = strTextPairs & "create_replication_set name=" & chr(34) & "RSet" & CStr(i) & chr(34) & " group=" & chr(34) & str_CG_NAME & chr(34) & vbcrlf
+					strTextPairs = strTextPairs & "add_replication_volume group=" & chr(34) & str_CG_NAME & chr(34) & " copy=" & chr(34) & str_COPY_PRODUCTION & chr(34) & " replication_set=" & chr(34) & "RSet" & CStr(i) & chr(34) & " uid=" & chr(34) & Replace(split_pair(0), ":", ",") & chr(34) & vbcrlf
+					strTextPairs = strTextPairs & "add_replication_volume group=" & chr(34) & str_CG_NAME & chr(34) & " copy=" & chr(34) & str_COPY_REPLICA & chr(34) & " replication_set=" & chr(34) & "RSet" & CStr(i) & chr(34) & " uid=" & chr(34) & Replace(split_pair(1), ":", ",") & chr(34) & vbcrlf
+				end if
+			else
+				MsgBox ("ERROR: Invalid Device Pair: Line " & CStr(i+1))
+			end if
+			i=i+1
+		next
+	else
+		strTextPairs = "##### NO REPLICATION SET VALUES PROVIDED #####" & vbcrlf
+	end if
+	
+	'ADD PRODUCTION JOURNAL
+	Dim strProdJrnl, pjrnls, pjrnl
+	re.pattern = "^((([a-f0-9]{2})|:)+)$"
+	re.IgnoreCase = true
+	pjrnls = Split(str_ProdJrnl, vbcrlf)
+	i = 0
+	if UBound(pjrnls) > -1 then
+		for each pjrnl in pjrnls
+			if re.Test(pjrnl) then
+				strProdJrnl = strProdJrnl & "add_journal_volume group=" & chr(34) & str_CG_NAME & chr(34) & " copy=" & chr(34) & str_COPY_PRODUCTION & chr(34) & " uid=" & chr(34) & Replace(pjrnl, ":", ",") & chr(34) & vbcrlf
+			else
+				MsgBox ("ERROR: Invalid Production Journal: Line " & CStr(i+1))
+			end if
+			i=i+1
+		next
+	else
+		strProdJrnl = "##### NO PRODUCTION JOURNAL VALUES PROVIDED #####" & vbcrlf
+	end if
+	
+	'ADD REPLICA JOURNAL
+	Dim strReplJrnl, rjrnls, rjrnl
+	Set rjrnls = Nothing
+	re.pattern = "^((([a-f0-9]{2})|:)+)$"
+	re.IgnoreCase = true
+	rjrnls = Split(str_ReplJrnl, vbcrlf)
+	i = 0
+	if UBound(rjrnls) > -1 then
+		for each rjrnl in rjrnls
+			if re.Test(rjrnl) then
+				strReplJrnl = strReplJrnl & "add_journal_volume group=" & chr(34) & str_CG_NAME & chr(34) & " copy=" & chr(34) & str_COPY_REPLICA & chr(34) & " uid=" & chr(34) & Replace(rjrnl, ":", ",") & chr(34) & vbcrlf
+			else
+				MsgBox ("ERROR: Invalid Replica Journal: Line " & CStr(i+1))
+			end if
+			i=i+1
+		next
+	else
+		strReplJrnl = "##### NO REPLICA JOURNAL VALUES PROVIDED #####" & vbcrlf
+	end if
+	
+	Dim create_link
+	create_link = "create_link group=" & chr(34) & str_CG_NAME & chr(34) & " copy_1=" & chr(34) & str_COPY_PRODUCTION & chr(34) & " copy_2=" & chr(34) & str_COPY_REPLICA & chr(34) & " mode=async" & vbcrlf
+
+	Dim config_copy_policy
+	config_copy_policy = "##### INCREASING JOURNAL SIZE LIMIT IS ONLY APPLICABLE BEFORE RP 4.1 #####" & vbcrlf
+	config_copy_policy = config_copy_policy & "#config_copy_policy group=" & chr(34) & str_CG_NAME & chr(34) & " copy=" & chr(34) & str_COPY_PRODUCTION & chr(34) & " journal_size_limit=10000" & vbcrlf
+	config_copy_policy = config_copy_policy & "#config_copy_policy group=" & chr(34) & str_CG_NAME & chr(34) & " copy=" & chr(34) & str_COPY_REPLICA & chr(34) & " journal_size_limit=10000" & vbcrlf
+	
+	'ADD SRM POLICY GROUP CONFIG, IF SRM MANAGED
+	Dim set_policy, config_external_mgmt
+	if bool_SRM = true then
+		config_external_mgmt = vbcrlf & "config_external_mgmt group=" & chr(34) & str_CG_NAME & chr(34) & " external_application=""SRM"" managed_by=""EXTERNAL_APPLICATION"" recovery_copy=" & chr(34) & str_COPY_REPLICA & chr(34)
+	end if
+	
+	CreateScript = strText & vbcrlf & strTextPairs & vbcrlf & strProdJrnl & vbcrlf & strReplJrnl & vbcrlf & create_link & vbcrlf & config_copy_policy & config_external_mgmt
+End Function
+
+Function CleanText(strTxt)
+	'STATUS: WORKS
+	Dim strText
+	strText = strTxt
+	'Create the RegExp object
+	Dim re1, re2
+	Set re1 = new regexp
+	Set re2 = new regexp
+	re1.global = re2.global = true
+	re1.pattern = "(\r\n(\s+)\r\n)|(\r\n\r\n)|(\r\n\s+)|(\s+\r\n)"
+	re2.pattern = "^(\r\n)|(\r\n)$|^(\s+)|(\s+)$"
+	do
+		'Remove lines of space characters and blank lines
+		strText = re1.Replace(strText, vbcrlf)
+		'Remove blank lines at beginning and end of text
+		strText = re2.Replace(strText, "")
+	loop while (re1.Test(strText) = True Or re2.Test(strText) = True)
+	'Return text
+	CleanText = strText
+End Function
+
+Sub SetOutput()
+	Dim TheForm, str_CG_NAME, str_COPY_PRODUCTION, str_COPY_REPLICA, str_CLUSTER_PRODUCTION, str_CLUSTER_REPLICA, str_RSETS, str_ProdJrnl, str_ReplJrnl, bool_SRM
+	Set TheForm = self.document
+	str_CG_NAME = document.getElementById("txt_CG_NAME").value
+	str_COPY_PRODUCTION = document.getElementById("txt_COPY_PRODUCTION").value
+	str_COPY_REPLICA = document.getElementById("txt_COPY_REPLICA").value
+	str_CLUSTER_PRODUCTION = document.getElementById("txt_CLUSTER_PRODUCTION").value
+	str_CLUSTER_REPLICA = document.getElementById("txt_CLUSTER_REPLICA").value
+	str_RSETS = CleanText(document.getElementById("txtarea_RSet").value)
+	str_ProdJrnl = CleanText(document.getElementById("txtarea_ProdJrnl").value)
+	str_ReplJrnl = CleanText(document.getElementById("txtarea_ReplJrnl").value)
+	document.getElementById("txtarea_RSet").value = str_RSETS
+	document.getElementById("txtarea_ProdJrnl").value = str_ProdJrnl
+	document.getElementById("txtarea_ReplJrnl").value = str_ReplJrnl
+	bool_SRM = document.forms("inputform").chkbox_SRM.checked
+	document.forms("outputform").txtarea_OUTPUT.Value=CreateScript(str_CG_NAME, str_COPY_PRODUCTION, str_COPY_REPLICA, str_CLUSTER_PRODUCTION, str_CLUSTER_REPLICA, str_RSETS, str_ProdJrnl, str_ReplJrnl, bool_SRM)
+End Sub
+
+Sub ResetTxt()
+	'document.forms("inputform").strInput.Value=""
+	document.forms("outputform").txtarea_OUTPUT.Value=""
+	'document.forms("inputform").strInput.focus()
+End Sub
+
+Sub ResetTxtAll()
+	document.forms("inputform").txt_CG_NAME.Value=""
+	document.forms("inputform").txtarea_RSet.Value=""
+	document.forms("inputform").txtarea_ProdJrnl.Value=""
+	document.forms("inputform").txtarea_ReplJrnl.Value=""
+	document.forms("outputform").txtarea_OUTPUT.Value=""
+End Sub
+
+Sub CopyOutput()
+	document.parentwindow.clipboardData.SetData "text", document.forms("outputform").txtarea_OUTPUT.Value
+End Sub
+
+Sub SubmitAndCopy()
+	SetOutput ()
+	CopyOutput()
+End Sub
+
+</SCRIPT>
+
+
+<BODY>
+<form name="inputform">
+	<table name="separator_input" cellpadding=10>
+		<tbody>
+		<tr>
+			<td valign=top rowspan="3">
+					CG Name:<br><input type="text" style="width: 150px" name="txt_CG_NAME" value="servername"><br>
+					Copy Local:<br><input type="text" style="width: 150px" name="txt_COPY_PRODUCTION" value="SRC_Prod"><br>
+					Copy Remote:<br><input type="text" style="width: 150px" name="txt_COPY_REPLICA" value="TGT_DR"><br>
+					RP Local:<br><input type="text" style="width: 150px" name="txt_CLUSTER_PRODUCTION" value="SRC_RP"><br>
+					RP Remote:<br><input type="text" style="width: 150px" name="txt_CLUSTER_REPLICA" value="TGT_RP"><br>
+					<input type="button" style="width: 150px" value="Submit & Copy" onclick="SubmitAndCopy()">
+					<input type="button" style="width: 73px" value="Submit" onclick="SetOutput()">
+					<input type="button" style="width: 73px" value="Copy" onclick="CopyOutput()">
+					<input type="button" style="width: 150px" value="Reset Output" onclick="ResetTxt()">
+					<input type="button" style="width: 150px" value="Reset All" onclick="ResetTxtAll()">
+			</td>
+			<td valign=top rowspan="3">
+					Replication Set Pair(s):<br><textarea name="txtarea_RSet" rows="16" cols="30" wrap="off"></textarea>
+			</td>
+			<td valign=top>
+				Production Journal(s):<br><textarea name="txtarea_ProdJrnl" rows="3" cols="30" wrap="off"></textarea>
+			</td>		
+		</tr>
+		<tr>
+			<td valign=top>Replica Journal(s):<br><textarea name="txtarea_ReplJrnl" rows="3" cols="30" wrap="off"></textarea></td>
+		</tr>
+		<tr>
+			<td valign=top><input type="checkbox" name="chkbox_SRM" checked="false">Managed by SRM?</td>
+		</tr>
+		</tbody>
+	</table>
+</form>
+<table name="separator_output">
+	<tr>
+		<td>
+			<form name="outputform">
+				Output:<br><textarea name="txtarea_OUTPUT" rows="10" cols="88" wrap="off"></textarea>
+			</form>
+		</td>
+	</tr>
+</table>
+</BODY>
+</HTML>
